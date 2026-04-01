@@ -1,19 +1,19 @@
 [package]
-name = "pyo3_template"
-version = "0.0.1"
+name = "supervisor"
+version = "0.1.0"
 edition = "2021"
-description = "A Pyo3 Project Template For HydroRoll."
+description = "Agent framework written in Rust and built for Rust/Python."
 license = "MIT"
-documentation = "https://{project}.hydroroll.team/"
-homepage = "https://hydroroll.team/"
-repository = "https://github.com/HydroRoll-Team/{project}"
-authors = ["yourname"]
+documentation = "https://supervisor-rs.readthedocs.io/"
+homepage = "https://github.com/HsiangNianian/supervisor.rs"
+repository = "https://github.com/HsiangNianian/supervisor.rs"
+authors = ["HsiangNianian"]
+keywords = ["agent", "supervisor", "actor", "pyo3", "framework"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "_core"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.19.2", features = ["abi3-py39"] }
-time = { version = "0.3.36", features = ["formatting", "macros", "local-offset"] }
