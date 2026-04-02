@@ -43,3 +43,7 @@ logs/
 # virtual environment
 .venv/
 .pytest_cache/
+
+# example secrets
+examples/a2a/.env
+!examples/a2a/.env.example

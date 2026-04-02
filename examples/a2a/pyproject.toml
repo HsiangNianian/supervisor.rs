@@ -1,0 +1,18 @@
+[project]
+name = "a2a-example"
+version = "0.1.0"
+description = "A2A multi-agent example using supervisor.rs with ReAct reasoning"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0",
+    "python-dotenv>=1.0",
+    "httpx>=0.25",
+    "supervisor",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+supervisor = { path = "../../", editable = true }
