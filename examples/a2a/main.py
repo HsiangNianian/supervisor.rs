@@ -29,7 +29,6 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from supervisor import Agent, Message, Supervisor
-from supervisor._core import ToolRegistry, ToolSpec
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -243,7 +242,6 @@ class ReActAgent(Agent):
         self.system_prompt = system_prompt
         self.tools = tools
         self.tool_map: dict[str, Any] = tool_map or {}
-        self._tool_registry = ToolRegistry()
         self.last_response: str | None = None
 
     # -- ReAct loop ----------------------------------------------------------
@@ -400,14 +398,18 @@ def main() -> None:
         "ask_search_agent": _make_delegator(search_agent),
     }
 
-    # -- Register tool specs in Rust ToolRegistry ----------------------------
+    # -- Register tool specs in Rust ToolRegistry (demonstration) ---------------
+    from supervisor._core import ToolRegistry, ToolSpec
+
+    tool_registry = ToolRegistry()
     for name, desc in [
         ("bash", "Execute a bash command"),
         ("get_weather", "Get weather for a city"),
         ("web_search", "Search the web"),
     ]:
         spec = ToolSpec(name, desc)
-        main_agent._tool_registry.register(spec, main_agent.tool_map.get(name, lambda: None))
+        handler = main_agent.tool_map.get(name, lambda: None)
+        tool_registry.register(spec, handler)
 
     print(
         f"✅  {sup.agent_count()} agents registered: "
