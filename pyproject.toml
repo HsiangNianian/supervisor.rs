@@ -7,7 +7,7 @@ name = "supervisor"
 dynamic = ["version"]
 description = "Agent framework written in Rust and built for Rust/Python"
 authors = [{ name = "HsiangNianian", email = "i@jyunko.cn" }]
-dependencies = []
+dependencies = ["pydantic>=2.0"]
 requires-python = ">=3.9"
 readme = "README.rst"
 license = { text = "MIT" }

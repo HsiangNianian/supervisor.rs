@@ -3,6 +3,7 @@ from .agent import Agent
 from .async_agent import AsyncAgent, AsyncSupervisor
 from .ext import Extension
 from .state import State
+from .typed_message import TypedMessage
 
 __all__ = [
     "Agent",
@@ -12,4 +13,5 @@ __all__ = [
     "Message",
     "State",
     "Supervisor",
+    "TypedMessage",
 ]
