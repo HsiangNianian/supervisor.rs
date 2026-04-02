@@ -8,6 +8,12 @@ dynamic = ["version"]
 description = "Agent framework written in Rust and built for Rust/Python"
 authors = [{ name = "HsiangNianian", email = "i@jyunko.cn" }]
 dependencies = ["pydantic>=2.0", "httpx>=0.25", "tenacity>=8.0", "jinja2>=3.1"]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.100", "uvicorn>=0.23"]
+cli = ["typer>=0.9"]
+yaml = ["pyyaml>=6.0"]
+all = ["fastapi>=0.100", "uvicorn>=0.23", "typer>=0.9", "pyyaml>=6.0"]
 requires-python = ">=3.9"
 readme = "README.rst"
 license = { text = "MIT" }
@@ -30,6 +36,7 @@ documentation = "https://supervisor-rs.readthedocs.io/"
 
 [project.scripts]
 supervisor-demo = "supervisor.__main__:main"
+supervisor-cli = "supervisor.cli:main"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

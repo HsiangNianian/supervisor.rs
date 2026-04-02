@@ -1,0 +1,26 @@
+# Supervisor Configuration Example
+# See docs for full configuration reference
+
+name: my-supervisor
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "*"
+  websocket_enabled: true
+
+logging:
+  level: INFO
+  format: json
+
+tracing:
+  enabled: false
+  exporter: console
+  service_name: supervisor
+
+metrics:
+  enabled: false
+  endpoint: /metrics
+
+agents: []
