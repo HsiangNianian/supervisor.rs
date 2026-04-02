@@ -20,13 +20,16 @@ Example::
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from supervisor.ext import Extension
 
 if TYPE_CHECKING:
     from supervisor._core import Message
     from supervisor.agent import Agent
+
+# Type alias for reply handler callbacks.
+ReplyHandler = Callable[..., Any]
 
 
 class A2AExtension(Extension):
@@ -48,7 +51,7 @@ class A2AExtension(Extension):
     name: str = "a2a"
 
     def __init__(self) -> None:
-        self._reply_callbacks: Dict[str, object] = {}
+        self._reply_callbacks: Dict[str, ReplyHandler] = {}
 
     # -- broadcasting --------------------------------------------------------
 
@@ -92,7 +95,7 @@ class A2AExtension(Extension):
         agent: "Agent",
         recipient: str,
         content: str,
-        reply_handler: object,
+        reply_handler: ReplyHandler,
     ) -> None:
         """Send a message and register a *reply_handler* for the response.
 
@@ -103,7 +106,7 @@ class A2AExtension(Extension):
         self._reply_callbacks[recipient] = reply_handler
         agent.send(recipient, content)
 
-    def get_reply_handler(self, sender: str) -> Optional[object]:
+    def get_reply_handler(self, sender: str) -> Optional[ReplyHandler]:
         """Pop and return the reply callback registered for *sender*, if any."""
         return self._reply_callbacks.pop(sender, None)
 

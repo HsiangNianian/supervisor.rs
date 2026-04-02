@@ -26,10 +26,10 @@ AUTHORS = ",".join([f"{aut}" for aut in AUTHOR_TABLE])
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = "HydroRoll"  # PROJECT_NAME
+project = PROJECT_NAME
 release = PROJECT_VERSION  # "latest"
-copyright = "2023-PRESENT, HydroRoll-Team."
-author = AUTHORS  # "Hsiang Nianian"
+copyright = "2023-PRESENT, HsiangNianian."
+author = AUTHORS
 
 # html_title = "HydroRoll Docs"
 
@@ -57,11 +57,9 @@ extensions = [
 
 doctest_global_setup = '''
 try:
-    import hydro_roll as hr
-    import hydro_roll_core as hrc
+    import supervisor
 except ImportError:
-    hr = None
-    hrc = None
+    supervisor = None
 '''
 todo_include_todos = True
 todo_emit_warnings = True
@@ -69,7 +67,7 @@ intersphinx_mapping = {'python': ('https://docs.python.org/3', None)}
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 extlinks = {
-    "issue": ("https://github.com/HydroRoll-Team/HydroRoll/issues/%s", "[issue %s]"),
+    "issue": ("https://github.com/HsiangNianian/supervisor.rs/issues/%s", "[issue %s]"),
 }
 source_suffix = {
     ".rst": "restructuredtext",
@@ -118,25 +116,19 @@ html_show_sourcelink = True
 
 html_theme_options = {
     "announcement": "<em><a href='#'>documentation</a> is still under construction now, welcome any <a href='contributing.html'>contribution</a>!</em>",
-    "source_repository": "https://github.com/HydroRoll-Team/HydroRoll/",
+    "source_repository": "https://github.com/HsiangNianian/supervisor.rs/",
     "source_branch": "main",
     "source_directory": "docs/source/",
-    # Toc options
-    # "collapse_navigation": True,
-    # "sticky_navigation": False,
-    # "navigation_depth": 1,
-    # "includehidden": False,
-    # "titles_only": True,
     "footer_icons": [
         {
             "name": "GitHub",
-            "url": "https://github.com/HydroRoll-Team/HydroRoll/",
+            "url": "https://github.com/HsiangNianian/supervisor.rs/",
             "html": "",
             "class": "fa-brands fa-github",
         },
         {
             "name": "Pypi",
-            "url": "https://pypi.org/project/hydro_roll/",
+            "url": "https://pypi.org/project/supervisor/",
             "html": "",
             "class": "fa-brands fa-python",
         },
