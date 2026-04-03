@@ -22,11 +22,15 @@ repos:
         files: ^src/supervisors/|^tests/|^examples/|^docs/
 
   # ── Rust (src/) ──────────────────────────────────────────────────────────
+  # Note: Rust hooks require cargo to be installed.
+  # They are skipped in pre-commit.ci (ci.skip) but run locally.
   - repo: https://github.com/doublify/pre-commit-rust
     rev: v1.0
     hooks:
       - id: fmt
         files: ^src/.*\.rs$
+        ci: [skip]
       - id: clippy
         args: [--, -D, warnings]
         files: ^src/.*\.rs$
+        ci: [skip]
