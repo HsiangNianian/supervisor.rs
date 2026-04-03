@@ -1,16 +1,16 @@
 """A2A Plan/Todo Multi-Agent Example — DeepSeek Reasoner.
 
-A main planning agent with three sub-agents:
+A main planning agent with three sub-agents, using the supervisors SDK
+properly:
 
-* **planner_agent** — main agent with ``todo`` tool, delegates to sub-agents.
-* **write_file_agent** — writes content to files.
-* **read_file_agent** — reads file contents.
-* **shell_agent** — runs ``pwd`` and ``ls`` commands.
+* **planner_agent** — ``LoopAgent`` with ``todo`` + ``send_task`` tools
+* **write_file_agent** — ``LoopAgent`` with ``write_file`` tool
+* **read_file_agent** — ``LoopAgent`` with ``read_file`` tool
+* **shell_agent** — ``LoopAgent`` with ``pwd`` + ``ls`` tools
 
 All agents use the DeepSeek ``deepseek-reasoner`` model via the OpenAI SDK.
-
-Agent-to-agent communication uses ``send_task()`` which wraps a ``Message``
-object and routes it through the supervisor.
+Agent-to-agent communication uses ``Agent.send()`` through the shared
+``Supervisor``.
 
 Usage::
 
@@ -24,13 +24,15 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from supervisors import Agent, Message, Supervisor
+from supervisors import LoopAgent, Message, Supervisor
+from supervisors.ext.function_calling import FunctionCallingExtension
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -52,11 +54,10 @@ client = OpenAI(api_key=_api_key, base_url=_base_url)
 MODEL = os.getenv("MODEL", "deepseek-reasoner")
 
 # ---------------------------------------------------------------------------
-# Shared todo list (mutable state visible to planner_agent)
+# Shared state
 # ---------------------------------------------------------------------------
 
 _todo_list: list[dict[str, str]] = []
-
 
 # ---------------------------------------------------------------------------
 # Tool implementations
@@ -106,8 +107,7 @@ def write_file(path: str, content: str) -> str:
 def read_file(path: str) -> str:
     """Read content from a file."""
     try:
-        content = Path(path).read_text()
-        return content
+        return Path(path).read_text()
     except Exception as exc:
         return f"Error reading file: {exc}"
 
@@ -120,14 +120,13 @@ def pwd() -> str:
 def ls(path: str = ".") -> str:
     """List directory contents."""
     try:
-        entries = sorted(os.listdir(path))
-        return "\n".join(entries)
+        return "\n".join(sorted(os.listdir(path)))
     except Exception as exc:
         return f"Error listing directory: {exc}"
 
 
 # ---------------------------------------------------------------------------
-# OpenAI tool schemas
+# OpenAI tool schemas (for LLM function calling)
 # ---------------------------------------------------------------------------
 
 _TODO_SCHEMA: dict[str, Any] = {
@@ -159,6 +158,28 @@ _TODO_SCHEMA: dict[str, Any] = {
     },
 }
 
+_SEND_TASK_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "send_task",
+        "description": "Send a task message to a sub-agent via A2A communication.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "recipient": {
+                    "type": "string",
+                    "description": "Target agent name (write_file_agent, read_file_agent, shell_agent)",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "The task message to send",
+                },
+            },
+            "required": ["recipient", "message"],
+        },
+    },
+}
+
 _WRITE_FILE_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
@@ -167,14 +188,8 @@ _WRITE_FILE_SCHEMA: dict[str, Any] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path to write to",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to write",
-                },
+                "path": {"type": "string", "description": "File path to write to"},
+                "content": {"type": "string", "description": "Content to write"},
             },
             "required": ["path", "content"],
         },
@@ -189,10 +204,7 @@ _READ_FILE_SCHEMA: dict[str, Any] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path to read",
-                },
+                "path": {"type": "string", "description": "File path to read"},
             },
             "required": ["path"],
         },
@@ -204,11 +216,7 @@ _PWD_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "pwd",
         "description": "Return the current working directory.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
+        "parameters": {"type": "object", "properties": {}, "required": []},
     },
 }
 
@@ -230,182 +238,163 @@ _LS_SCHEMA: dict[str, Any] = {
     },
 }
 
-# Delegation schemas — each takes a message string to send to the sub-agent
-_DELEGATE_WRITE: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "send_task_write",
-        "description": "Send a task message to the write_file_agent via A2A communication.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "The message/task to send to write_file_agent",
-                },
-            },
-            "required": ["message"],
-        },
-    },
-}
-
-_DELEGATE_READ: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "send_task_read",
-        "description": "Send a task message to the read_file_agent via A2A communication.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "The message/task to send to read_file_agent",
-                },
-            },
-            "required": ["message"],
-        },
-    },
-}
-
-_DELEGATE_SHELL: dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "send_task_shell",
-        "description": "Send a task message to the shell_agent via A2A communication.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "The message/task to send to shell_agent",
-                },
-            },
-            "required": ["message"],
-        },
-    },
-}
-
-# Tool sets per agent
-MAIN_TOOLS = [_TODO_SCHEMA, _DELEGATE_WRITE, _DELEGATE_READ, _DELEGATE_SHELL]
-WRITE_FILE_TOOLS = [_WRITE_FILE_SCHEMA]
-READ_FILE_TOOLS = [_READ_FILE_SCHEMA]
-SHELL_TOOLS = [_PWD_SCHEMA, _LS_SCHEMA]
-
-
 # ---------------------------------------------------------------------------
-# ReAct Agent
+# LLMReActAgent — LoopAgent + OpenAI function calling
 # ---------------------------------------------------------------------------
 
 
-class ReActAgent(Agent):
-    """Agent that uses ReAct (Reason + Act) via OpenAI function-calling."""
+class LLMReActAgent(LoopAgent):
+    """LoopAgent that uses OpenAI function-calling with FunctionCallingExtension.
+
+    Each step() calls the LLM. If tool_calls are returned, they are executed
+    via the FunctionCallingExtension. If no tool_calls, the loop terminates.
+    """
 
     def __init__(
         self,
         name: str,
         *,
         system_prompt: str,
-        tools: list[dict[str, Any]],
-        tool_map: dict[str, Any] | None = None,
+        fc_extension: FunctionCallingExtension,
+        openai_tools: List[Dict[str, Any]],
+        max_iterations: int = 15,
+        max_context_messages: int = 20,
+        max_tool_calls_per_turn: int = 20,
     ) -> None:
-        super().__init__(name)
+        super().__init__(name, max_iterations=max_iterations)
         self.system_prompt = system_prompt
-        self.tools = tools
-        self.tool_map: dict[str, Any] = tool_map or {}
-        self.last_response: str | None = None
+        self.fc = fc_extension
+        self._openai_tools = openai_tools
+        self.max_context_messages = max_context_messages
+        self.max_tool_calls_per_turn = max_tool_calls_per_turn
+        self._history: deque[Dict[str, Any]] = deque()
+        self.last_response: str = ""
 
-    def react(self, user_message: str, *, max_steps: int = 10) -> str:
-        """Run a ReAct reasoning loop and return the final text answer."""
-        messages: list[dict[str, Any]] = [
+    def _build_messages(self, user_content: str) -> List[Dict[str, Any]]:
+        messages: List[Dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_message},
         ]
+        if self._history:
+            messages.extend(list(self._history)[-self.max_context_messages :])
+        messages.append({"role": "user", "content": user_content})
+        return messages
 
-        for _step in range(max_steps):
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=messages,
-                tools=self.tools or None,
-                tool_choice="auto" if self.tools else None,
-            )
+    def step(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        messages: List[Dict[str, Any]] = state["messages"]
+        tool_calls_count = state.get("tool_calls_count", 0)
 
-            choice = response.choices[0]
-            msg = choice.message
-            assistant_turn: dict[str, Any] = {"role": "assistant"}
-            if msg.content:
-                assistant_turn["content"] = msg.content
-            if msg.tool_calls:
-                assistant_turn["tool_calls"] = [
-                    tc.model_dump() for tc in msg.tool_calls
-                ]
-            messages.append(assistant_turn)
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            tools=self._openai_tools or None,
+            tool_choice="auto" if self._openai_tools else None,
+        )
 
-            if not msg.tool_calls:
-                self.last_response = msg.content or ""
-                return self.last_response
+        choice = response.choices[0]
+        msg = choice.message
 
-            for tc in msg.tool_calls:
-                fn_name = tc.function.name
-                fn_args: dict[str, Any] = json.loads(tc.function.arguments)
+        assistant_turn: Dict[str, Any] = {"role": "assistant"}
+        if msg.content:
+            assistant_turn["content"] = msg.content
+            print(f"  {self.name}: {msg.content}")
 
-                print(f"  [{self.name}] tool: {fn_name}({fn_args})")
+        if msg.tool_calls:
+            assistant_turn["tool_calls"] = [tc.model_dump() for tc in msg.tool_calls]
+        messages.append(assistant_turn)
 
-                if fn_name in self.tool_map:
-                    result = str(self.tool_map[fn_name](**fn_args))
-                else:
-                    result = f"Unknown tool: {fn_name}"
+        if not msg.tool_calls:
+            state["done"] = True
+            state["final_answer"] = msg.content or ""
+            self.last_response = state["final_answer"]
+            return state
 
-                preview = result[:300] + ("..." if len(result) > 300 else "")
-                print(f"  [{self.name}] result: {preview}")
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    }
+        for tc in msg.tool_calls:
+            if tool_calls_count >= self.max_tool_calls_per_turn:
+                print(f"  [{self.name}] max tool calls per turn reached, stopping.")
+                state["done"] = True
+                state["final_answer"] = (
+                    msg.content
+                    or f"(stopped after {self.max_tool_calls_per_turn} tool calls)"
                 )
+                self.last_response = state["final_answer"]
+                return state
 
-        return "(max reasoning steps reached)"
+            fn_name = tc.function.name
+            fn_args: Dict[str, Any] = json.loads(tc.function.arguments)
+            print(f"  [{self.name}] tool: {fn_name}({fn_args})")
 
-    def handle_message(self, msg: Message) -> None:
-        """Handle an incoming supervisor message via a ReAct loop."""
-        response = self.react(msg.content)
-        self.last_response = response
+            try:
+                result = str(self.fc.call_tool(fn_name, **fn_args))
+            except KeyError:
+                result = f"Unknown tool: {fn_name}"
+
+            preview = result[:300] + ("..." if len(result) > 300 else "")
+            print(f"  [{self.name}] result: {preview}")
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                }
+            )
+            tool_calls_count += 1
+
+        state["tool_calls_count"] = tool_calls_count
+        return state
+
+    def on_loop_start(self, msg: Message, state: Dict[str, Any]) -> None:
+        print(f"\n--- [{self.name}] processing message from '{msg.sender}' ---")
+        state["messages"] = self._build_messages(msg.content)
+        state["tool_calls_count"] = 0
+
+    def on_loop_end(self, msg: Message, state: Dict[str, Any], iterations: int) -> None:
+        answer = state.get("final_answer", "(no answer)")
+        self.last_response = answer
+
+        self._history.append({"role": "user", "content": msg.content})
+        self._history.append({"role": "assistant", "content": answer})
+        while len(self._history) > self.max_context_messages * 2:
+            self._history.popleft()
+
+        print(f"--- [{self.name}] completed in {iterations} iterations ---")
+
         if msg.sender and self.supervisor:
             try:
-                self.send(msg.sender, response)
+                self.send(msg.sender, answer)
             except (KeyError, RuntimeError):
                 pass
 
+    def clear_history(self) -> None:
+        self._history.clear()
 
-# A2A send_task helpers
+
+# ---------------------------------------------------------------------------
+# A2A send_task tool
 # ---------------------------------------------------------------------------
 
 
-def _make_send_task(sub_agent: ReActAgent, tool_name: str):
-    """Return a tool callable that sends a Message to *sub_agent* via the supervisor.
+def make_send_task_tool(sup: Supervisor, planner_agent: LLMReActAgent):
+    """Create a send_task tool that uses Agent.send() for A2A communication.
 
-    The tool receives a ``message`` string, wraps it in a ``Message`` object,
-    sends it through the supervisor, then runs the supervisor to process it
-    and returns the sub-agent's response.
+    The tool receives (recipient, message), wraps it in a Message, sends it
+    through the supervisor via Agent.send(), then runs the supervisor to
+    process the sub-agent and returns its response.
     """
 
-    def _send_task(message: str) -> str:
+    def send_task(recipient: str, message: str) -> str:
         preview = message[:80] + ("..." if len(message) > 80 else "")
-        print(f'    -> {tool_name}: [{sub_agent.name}] "{preview}"')
+        print(f'    -> send_task: [{recipient}] "{preview}"')
 
-        msg = Message(
-            sender="planner_agent",
-            recipient=sub_agent.name,
-            content=message,
-        )
-        sub_agent.supervisor.send(msg)
-        sub_agent.supervisor.run_once()
+        # Use the SDK's Agent.send() which wraps Message and routes via supervisor
+        planner_agent.send(recipient, message)
 
-        return sub_agent.last_response or "(no response)"
+        # Drive the supervisor to process the sub-agent's response
+        sup.run_once()
 
-    return _send_task
+        return planner_agent.last_response or "(no response)"
+
+    return send_task
 
 
 # ---------------------------------------------------------------------------
@@ -414,89 +403,167 @@ def _make_send_task(sub_agent: ReActAgent, tool_name: str):
 
 
 def main() -> None:
-    print("A2A Plan/Todo Multi-Agent System (supervisor.rs)")
+    print("A2A Plan/Todo Multi-Agent System (supervisors.rs)")
     print(f"Model: {MODEL}")
     print(f"API:   {_base_url}")
     print("=" * 55)
 
     sup = Supervisor()
 
-    # -- Create sub-agents ---------------------------------------------------
-    write_file_agent = ReActAgent(
-        "write_file_agent",
-        system_prompt=(
-            "You are a file-writing assistant. Use the write_file tool to write "
-            "content to files. Be helpful and confirm what was written."
-        ),
-        tools=WRITE_FILE_TOOLS,
+    # -- FunctionCallingExtension for each agent --
+
+    # Planner: todo + send_task
+    planner_fc = FunctionCallingExtension()
+    planner_fc.register_tool(
+        todo,
+        description="Manage a todo list (add, list, complete, remove).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "One of: add, list, complete, remove",
+                },
+                "item": {
+                    "type": "string",
+                    "description": "Todo item text (required for 'add')",
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "Index (required for 'complete'/'remove')",
+                },
+            },
+            "required": ["action"],
+        },
     )
 
-    read_file_agent = ReActAgent(
-        "read_file_agent",
-        system_prompt=(
-            "You are a file-reading assistant. Use the read_file tool to read "
-            "and display file contents. Be concise."
-        ),
-        tools=READ_FILE_TOOLS,
+    # Write file agent
+    write_fc = FunctionCallingExtension()
+    write_fc.register_tool(
+        write_file,
+        description="Write content to a file.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path"},
+                "content": {"type": "string", "description": "Content to write"},
+            },
+            "required": ["path", "content"],
+        },
     )
 
-    shell_agent = ReActAgent(
-        "shell_agent",
-        system_prompt=(
-            "You are a shell assistant. Use pwd to show the current directory "
-            "and ls to list directory contents. Be concise and helpful."
-        ),
-        tools=SHELL_TOOLS,
+    # Read file agent
+    read_fc = FunctionCallingExtension()
+    read_fc.register_tool(
+        read_file,
+        description="Read content from a file.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to read"},
+            },
+            "required": ["path"],
+        },
     )
 
-    # -- Create main planner agent -------------------------------------------
-    planner_agent = ReActAgent(
+    # Shell agent
+    shell_fc = FunctionCallingExtension()
+    shell_fc.register_tool(
+        pwd,
+        description="Return the current working directory.",
+        parameters={"type": "object", "properties": {}, "required": []},
+    )
+    shell_fc.register_tool(
+        ls,
+        description="List directory contents.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory path (default: '.')",
+                },
+            },
+            "required": [],
+        },
+    )
+
+    # -- Create agents --
+
+    planner_agent = LLMReActAgent(
         "planner_agent",
         system_prompt=(
             "You are a planning assistant that manages tasks and delegates to specialists.\n"
             "Tools available:\n"
             "  - todo: manage a todo list (add, list, complete, remove tasks)\n"
-            "  - send_task (to write_file_agent): send a message to the file-writing specialist\n"
-            "  - send_task (to read_file_agent): send a message to the file-reading specialist\n"
-            "  - send_task (to shell_agent): send a message to the directory specialist\n\n"
+            "  - send_task: send a message to a sub-agent via A2A communication.\n"
+            "    Available recipients: write_file_agent, read_file_agent, shell_agent\n\n"
             "Use ReAct reasoning: think step-by-step, use the todo tool to plan, "
             "delegate to sub-agents via send_task when needed, then give a final answer."
         ),
-        tools=MAIN_TOOLS,
+        fc_extension=planner_fc,
+        openai_tools=[_TODO_SCHEMA, _SEND_TASK_SCHEMA],
+        max_iterations=20,
+        max_tool_calls_per_turn=15,
     )
+    planner_agent.use(planner_fc)
 
-    # -- Register with supervisor --------------------------------------------
+    write_file_agent = LLMReActAgent(
+        "write_file_agent",
+        system_prompt="You are a file-writing assistant. Use the write_file tool to write content to files. Be concise.",
+        fc_extension=write_fc,
+        openai_tools=[_WRITE_FILE_SCHEMA],
+    )
+    write_file_agent.use(write_fc)
+
+    read_file_agent = LLMReActAgent(
+        "read_file_agent",
+        system_prompt="You are a file-reading assistant. Use the read_file tool to read and display file contents.",
+        fc_extension=read_fc,
+        openai_tools=[_READ_FILE_SCHEMA],
+    )
+    read_file_agent.use(read_fc)
+
+    shell_agent = LLMReActAgent(
+        "shell_agent",
+        system_prompt="You are a shell assistant. Use pwd and ls to show directory information.",
+        fc_extension=shell_fc,
+        openai_tools=[_PWD_SCHEMA, _LS_SCHEMA],
+    )
+    shell_agent.use(shell_fc)
+
+    # -- Register all agents with the shared supervisor --
+    planner_agent.register(sup)
     write_file_agent.register(sup)
     read_file_agent.register(sup)
     shell_agent.register(sup)
-    planner_agent.register(sup)
 
-    # -- Wire up tool maps ---------------------------------------------------
-    write_file_agent.tool_map = {
-        "write_file": write_file,
-    }
-    read_file_agent.tool_map = {
-        "read_file": read_file,
-    }
-    shell_agent.tool_map = {
-        "pwd": pwd,
-        "ls": ls,
-    }
-    planner_agent.tool_map = {
-        "todo": todo,
-        "send_task_write": _make_send_task(write_file_agent, "send_task_write"),
-        "send_task_read": _make_send_task(read_file_agent, "send_task_read"),
-        "send_task_shell": _make_send_task(shell_agent, "send_task_shell"),
-    }
+    # -- Wire up send_task tool (needs sup + planner_agent references) --
+    send_task_fn = make_send_task_tool(sup, planner_agent)
+    planner_fc.register_tool(
+        send_task_fn,
+        description="Send a task message to a sub-agent via A2A.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "recipient": {"type": "string", "description": "Target agent name"},
+                "message": {
+                    "type": "string",
+                    "description": "The task message to send",
+                },
+            },
+            "required": ["recipient", "message"],
+        },
+    )
 
     print(f"[OK] {sup.agent_count()} agents registered: {', '.join(sup.agent_names())}")
-    print("[OK] Planner tools: todo + send_task_write/read/shell (A2A message-based)")
-    print("[OK] Sub-agents: write_file, read_file, shell (pwd+ls)")
+    print("[OK] Planner: todo + send_task (A2A via Agent.send)")
+    print("[OK] Sub-agents: write_file_agent, read_file_agent, shell_agent")
     print("\nType a message to the planner agent.")
     print("Commands: 'quit' to exit, 'todos' to show current todo list.")
     print(f"{'-' * 55}")
 
-    # -- Interactive loop ----------------------------------------------------
+    # -- Interactive loop --
     while True:
         try:
             user_input = input("\nYou: ").strip()
@@ -509,8 +576,10 @@ def main() -> None:
                 continue
 
             print()
-            response = planner_agent.react(user_input)
-            print(f"\nAgent: {response}")
+            msg = Message("user", "planner_agent", user_input)
+            planner_agent.handle_message(msg)
+            sup.run_once()
+            print(f"\nAgent: {planner_agent.last_response}")
 
         except (KeyboardInterrupt, EOFError):
             break
