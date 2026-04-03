@@ -10,7 +10,7 @@ Rust core and a flexible Python API.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)
-[![Docs](https://readthedocs.org/projects/supervisors-rs/badge/?version=latest)](https://supervisor-rs.readthedocs.io/)
+[![Docs](https://readthedocs.org/projects/supervisors-rs/badge/?version=latest)](https://supervisors.hydroroll.team/)
 
 [Getting Started](#getting-started) |
 [Agent Types](#agent-types) |
