@@ -35,11 +35,8 @@ class Extension:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-
-    if not cls.name:
-        # Auto-derive a name from the class name when the author does
-        # not set one explicitly.
-        cls.name = cls.__name__
+        if not cls.name:
+            cls.name = cls.__name__
 
     # -- lifecycle hooks -----------------------------------------------------
 
