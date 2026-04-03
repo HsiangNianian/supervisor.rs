@@ -127,7 +127,7 @@ The `SupervisorAgent` routes incoming messages to specialised sub-agents
 based on a routing function.
 
 ```python
-from supervisor import Agent, SupervisorAgent, Message, Supervisor
+from supervisors import Agent, SupervisorAgent, Message, Supervisor
 
 class Worker(Agent):
     def handle_message(self, msg):

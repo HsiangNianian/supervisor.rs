@@ -47,3 +47,4 @@ logs/
 # example secrets
 examples/a2a/.env
 !examples/a2a/.env.example
+.env
