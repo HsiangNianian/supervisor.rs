@@ -11,18 +11,22 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
-  # ── Python ───────────────────────────────────────────────────────────────
+  # ── Python (src/, tests/, examples/, docs/) ──────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.6
     hooks:
       - id: ruff
         args: [--fix]
+        files: ^src/supervisors/|^tests/|^examples/|^docs/
       - id: ruff-format
+        files: ^src/supervisors/|^tests/|^examples/|^docs/
 
-  # ── Rust ─────────────────────────────────────────────────────────────────
+  # ── Rust (src/) ──────────────────────────────────────────────────────────
   - repo: https://github.com/doublify/pre-commit-rust
     rev: v1.0
     hooks:
       - id: fmt
+        files: ^src/.*\.rs$
       - id: clippy
         args: [--, -D, warnings]
+        files: ^src/.*\.rs$
